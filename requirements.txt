@@ -1,0 +1,17 @@
+# Use CPU wheels for PyTorch so it builds on Hugging Face Spaces
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.5.1
+cellpose==2.2.3
+
+streamlit==1.37.0
+numpy
+pandas
+scipy
+scikit-image
+tifffile
+imageio
+matplotlib
+seaborn
+hdbscan
+openpyxl
