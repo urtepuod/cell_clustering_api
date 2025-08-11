@@ -28,6 +28,6 @@ if uploaded_zip and st.button("Run Analysis"):
 
             if scatter_path and os.path.exists(scatter_path):
                 st.subheader("3D Cell Count Scatter Plot")
-                st.image(scatter_path, caption="3D object clustering", use_container_width=True)
+                st.image(scatter_path, caption="3D object clustering", use_column_width=True)
 
     st.success("✅ Processing complete.")
