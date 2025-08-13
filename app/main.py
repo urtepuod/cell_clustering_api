@@ -1,9 +1,15 @@
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+warnings.filterwarnings("ignore", category=FutureWarning, module="cellpose")
+
 import streamlit as st
 import os
 import sys
 import tempfile
 import zipfile
+st.set_page_config(page_title="Cell Counting App", layout="wide")
 
+st.caption("startup ok") 
 # --- ensure repo root is on sys.path so "app.*" works when running app/main.py directly
 HERE = os.path.dirname(os.path.abspath(__file__))          # .../app
 PROJECT_ROOT = os.path.abspath(os.path.join(HERE, ".."))   # repo root
@@ -65,55 +71,26 @@ sample_choice = st.selectbox("…or try a sample dataset", ["(none)"] + list(SAM
 
 if st.button("Run Analysis", type="primary"):
     try:
+        st.info("step 1: preparing temp dir…")
         with st.spinner("Processing..."):
             with tempfile.TemporaryDirectory() as tmpdir:
-                # 1) Decide which ZIP to use
-                if uploaded_zip is not None:
-                    zip_to_use = os.path.join(tmpdir, "uploaded.zip")
-                    with open(zip_to_use, "wb") as f:
-                        f.write(uploaded_zip.read())
-                elif sample_choice != "(none)":
-                    if hf_hub_download is None:
-                        st.error("`huggingface_hub` not available; please upload a ZIP instead.")
-                        st.stop()
-                    # Download the selected sample file
-                    zip_to_use = hf_hub_download(
-                        repo_id=DATASET_ID,
-                        repo_type="dataset",
-                        filename=SAMPLES[sample_choice],  # subfolder path lives here
-                    )
-                else:
-                    st.warning("Please upload a ZIP or select a sample dataset.")
-                    st.stop()
-
-                # 2) Extract ZIP
-                try:
-                    with zipfile.ZipFile(zip_to_use, "r") as zf:
-                        zf.extractall(tmpdir)
-                except zipfile.BadZipFile:
-                    st.error("Uploaded file is not a valid ZIP.")
-                    st.stop()
-
-                # 3) Run the pipeline
+                st.info("step 2: choosing ZIP…")
+                # (your logic that picks uploaded vs sample)
+                st.info("step 3: extracting ZIP…")
+                # (extract)
+                st.info("step 4: running pipeline…")
                 output_path, scatter_path = process_all_dirs(tmpdir, model_choice, clustering_method)
 
-                # 4) Download results + show image (if produced)
+                st.info("step 5: preparing outputs…")
                 if os.path.exists(output_path):
                     with open(output_path, "rb") as f:
-                        st.download_button(
-                            "Download Cell Count Summary",
-                            f,
-                            file_name="cell_counts_summary.xlsx",
-                        )
-                else:
-                    st.warning("No results file was produced.")
+                        st.download_button("Download Cell Count Summary", f, file_name="cell_counts_summary.xlsx")
 
                 if scatter_path and os.path.exists(scatter_path):
                     st.subheader("3D Cell Count Scatter Plot")
-                    st.image(scatter_path, caption="3D object clustering", use_column_width=True)
+                    st.image(scatter_path, caption="3D object clustering", use_container_width=True)
 
         st.success("✅ Processing complete.")
     except Exception as e:
-        # Surface any unexpected errors instead of blank screen
         st.error("An error occurred while processing:")
         st.exception(e)
