@@ -24,7 +24,7 @@ clustering_method = st.selectbox("Choose clustering method", ["Distance-based", 
 uploaded_zip = st.file_uploader("Upload a ZIP of TIFF folders", type="zip")
 
 # point to your dataset repo + filenames there
-DATASET_ID = "urtepuod/cell_clustering_samples"   # <-- change to your dataset repo
+DATASET_ID = "urtepuod/cell_clustering_samples/sample_cells"   # <-- change to your dataset repo
 SAMPLES = {
     "Non-motile cells demo": "24_03_02_05_34_27.zip",
     "Motile cells demo": "24_11_19_01_25_31.zip",
