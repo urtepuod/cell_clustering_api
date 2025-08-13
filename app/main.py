@@ -3,88 +3,99 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=FutureWarning, module="cellpose")
 
 import streamlit as st
-import os
-import sys
-import tempfile
-import zipfile
-st.set_page_config(page_title="Cell Counting App", layout="wide")
+import os, sys, tempfile, zipfile
 
-st.caption("startup ok") 
-# --- ensure repo root is on sys.path so "app.*" works when running app/main.py directly
+# Ensure we can import app.processor whether Spaces runs app.py or app/main.py
 HERE = os.path.dirname(os.path.abspath(__file__))          # .../app
 PROJECT_ROOT = os.path.abspath(os.path.join(HERE, ".."))   # repo root
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# --- import processor with useful diagnostics
+# --- import processor with diagnostics
 try:
-    from app.processor import process_all_dirs          # preferred
-except ImportError as e1:
+    from app.processor import process_all_dirs  # preferred
+except ImportError:
     try:
-        # fallback if Python is treating this as a flat script and app/ is already on path
-        from processor import process_all_dirs
-    except ImportError as e2:
+        from processor import process_all_dirs  # fallback
+    except ImportError as e:
         st.error("Couldn't import process_all_dirs from processor.py")
-        st.code(
-            "ImportErrors:\n"
-            f"  app.processor -> {e1}\n"
-            f"  processor      -> {e2}\n\n"
-            f"HERE={HERE}\nPROJECT_ROOT={PROJECT_ROOT}\n"
-            f"sys.path[0:3]={sys.path[:3]} ..."
-        )
-        # show what's actually in the app folder to catch typos/missing files
+        st.code(str(e))
         try:
             st.write("Files in app/:", os.listdir(HERE))
         except Exception:
             pass
         st.stop()
-except Exception as e:
-    # processor.py was found but crashed during import — show the real error
-    st.error("processor.py raised an error during import:")
-    st.exception(e)
-    st.stop()
-# Optional: fetch sample ZIPs from the Hub if huggingface_hub is available
+
+# Optional Hub samples
 try:
     from huggingface_hub import hf_hub_download
 except Exception:
-    hf_hub_download = None  # app still works with manual uploads
+    hf_hub_download = None
 
 st.set_page_config(page_title="Cell Counting App", layout="wide")
 st.title("🔬 Cell Counting App")
+st.caption("startup ok")
 
 model_choice = st.selectbox("Choose a segmentation model", ["temporal_5"])
 clustering_method = st.selectbox("Choose clustering method", ["Distance-based", "HDBSCAN"])
 
-# --- Upload OR Sample ---
 uploaded_zip = st.file_uploader("Upload a ZIP of TIFF folders", type="zip")
 
-# Your dataset repo on the Hub (NO subfolder here)
+# Your dataset repo on the Hub (namespace/repo only)
 DATASET_ID = "urtepuod/cell_clustering_samples"
-
-# Map labels to file paths inside the dataset repo
 SAMPLES = {
     "Non-motile cells demo": "sample_cells/24_03_02_05_34_27.zip",
     "Motile cells demo":     "sample_cells/24_11_19_01_25_31.zip",
 }
-
 sample_choice = st.selectbox("…or try a sample dataset", ["(none)"] + list(SAMPLES.keys()))
 
 if st.button("Run Analysis", type="primary"):
     try:
-        st.info("step 1: preparing temp dir…")
         with st.spinner("Processing..."):
             with tempfile.TemporaryDirectory() as tmpdir:
-                st.info("step 2: choosing ZIP…")
-                # (your logic that picks uploaded vs sample)
-                st.info("step 3: extracting ZIP…")
-                # (extract)
-                st.info("step 4: running pipeline…")
+                # --- 1) Decide which ZIP to use
+                st.info("step 1: choosing ZIP…")
+                if uploaded_zip is not None:
+                    zip_path = os.path.join(tmpdir, "uploaded.zip")
+                    with open(zip_path, "wb") as f:
+                        f.write(uploaded_zip.read())
+                elif sample_choice != "(none)":
+                    if hf_hub_download is None:
+                        st.error("`huggingface_hub` not available; please upload a ZIP instead.")
+                        st.stop()
+                    zip_path = hf_hub_download(
+                        repo_id=DATASET_ID,
+                        repo_type="dataset",
+                        filename=SAMPLES[sample_choice],
+                    )
+                else:
+                    st.warning("Please upload a ZIP or select a sample dataset.")
+                    st.stop()
+
+                # --- 2) Extract into tmpdir
+                st.info("step 2: extracting ZIP…")
+                try:
+                    with zipfile.ZipFile(zip_path, "r") as zf:
+                        zf.extractall(tmpdir)
+                except zipfile.BadZipFile:
+                    st.error("Uploaded file is not a valid ZIP.")
+                    st.stop()
+
+                # --- 3) Run your pipeline
+                st.info("step 3: running pipeline…")
                 output_path, scatter_path = process_all_dirs(tmpdir, model_choice, clustering_method)
 
-                st.info("step 5: preparing outputs…")
+                # --- 4) Outputs
+                st.info("step 4: preparing outputs…")
                 if os.path.exists(output_path):
                     with open(output_path, "rb") as f:
-                        st.download_button("Download Cell Count Summary", f, file_name="cell_counts_summary.xlsx")
+                        st.download_button(
+                            "Download Cell Count Summary",
+                            f,
+                            file_name="cell_counts_summary.xlsx",
+                        )
+                else:
+                    st.warning("No results file was produced.")
 
                 if scatter_path and os.path.exists(scatter_path):
                     st.subheader("3D Cell Count Scatter Plot")
