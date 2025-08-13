@@ -33,7 +33,7 @@ SAMPLES = {
 zip_path = hf_hub_download(
     repo_id=DATASET_ID,
     repo_type="dataset",
-    filename=SAMPLES[sample_choice],  # includes subfolder if any
+    filename=SAMPLES[sample_cells],  # includes subfolder if any
 )
 
 sample_choice = st.selectbox("…or try a sample dataset", ["(none)"] + list(SAMPLES.keys()))
