@@ -8,15 +8,20 @@ import pandas as pd
 import re
 import seaborn as sns
 import hdbscan
-import matplotlib; matplotlib.use("Agg")
+import matplotlib
+matplotlib.use("Agg")              # set backend first
+import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from collections import Counter
 
 # Parameters
-MIN_CLUSTER_SIZE = 5  # min cluster size for a cluster to be considered valid
+MIN_CLUSTER_SIZE = 6  # min cluster size for a cluster to be considered valid
 MAX_GAP = 15  # how many times a cell is to reoccur throughout the stack
 SKIP_ALLOWED = 1  # cell to be counted as the same cell even if one segmentation mask is missing
-MIN_SAMPLES = 3 # Set min_samples to 3 for HDBSCAN to cluster the same cell across frames
+MIN_SAMPLES = None # Set min_samples to 3 for HDBSCAN to cluster the same cell across frames
+PIX_PER_UM_RAW   = 18.8   # raw XY pixels per micron at the sample (before resizing)
+Z_UM_PER_SLICE   = 1.0    # physical z-step per slice in microns
+IMAGE_RESIZE_FACTOR = 3   # you already use this in load_images(...)
 
 def numerical_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
@@ -36,24 +41,34 @@ def update_processed_directories_log(directory, log_file_path):
 
 
 def process_directory(directory, model, model_identifier):
-    images = load_images(directory)
+    images = load_images(directory, image_resize_factor=IMAGE_RESIZE_FACTOR)
 
-    # Create a directory for results inside the current directory
     results_dir = os.path.join(directory, f'results_model{model_identifier}')
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir)
+    os.makedirs(results_dir, exist_ok=True)
 
-    # Run cellpose model
-    channels = [[0, 0]]  # 0, 0 means grayscale image
+    # Run Cellpose
+    channels = [[0, 0]]
     masks, flows, styles = model.eval(images, diameter=30, channels=channels, compute_masks=True)
 
-    # Save Masks, Overlays, and create 3D Stack
+    # Save overlays + diagnostic 3D scatter
     save_masks_overlay(images, masks, results_dir)
     create_3d_stack(masks, results_dir)
 
-    # Count Objects and Save the Count
-    number_of_cells = count_objects_hdbscan(masks, results_dir, z_scaling_factor=2.0, min_cluster_size=MIN_CLUSTER_SIZE, min_samples=MIN_SAMPLES)
+    # ---- KEY: set z_scaling_factor in XY-pixel units ----
+    # Effective pixels-per-micron after resizing:
+    pix_per_um_eff = PIX_PER_UM_RAW / IMAGE_RESIZE_FACTOR
+    # One z-step in "XY pixel" units:
+    z_scaling_factor = pix_per_um_eff * Z_UM_PER_SLICE
+
+    # Count with HDBSCAN (3D)
+    number_of_cells = count_objects_hdbscan(
+        masks, results_dir,
+        z_scaling_factor=z_scaling_factor,
+        min_cluster_size=MIN_CLUSTER_SIZE,
+        min_samples=MIN_SAMPLES
+    )
     return number_of_cells
+
 
 
 
@@ -109,12 +124,16 @@ def create_3d_stack(masks, save_directory):
     ax = fig.add_subplot(111, projection='3d')
 
     for i, mask in enumerate(masks):
-        labeled_mask, num_labels = measure.label(mask, return_num=True)
-        for label in range(1, num_labels + 1):
-            object_indices = np.argwhere(labeled_mask == label)
+    # iterate true instance IDs from Cellpose (skip 0 = background)
+        for lbl in np.unique(mask):
+            if lbl == 0:
+                continue
+            object_indices = np.argwhere(mask == lbl)
+            if object_indices.size == 0:
+                continue
             z_coords = np.full((object_indices.shape[0],), i)
-            color = np.random.rand(3,).tolist()  # Convert numpy array to list
-            ax.scatter(object_indices[:, 1], object_indices[:, 0], z_coords, color=color, marker='o')
+            color = np.random.rand(3,).tolist()
+            ax.scatter(object_indices[:, 1], object_indices[:, 0], z_coords, color=color, marker='o', s=1)
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -158,56 +177,64 @@ def count_objects_hdbscan(
         *, z_scaling_factor=2.0,
            min_cluster_size=MIN_CLUSTER_SIZE,
            min_samples=MIN_SAMPLES,
-         debug=False):
+           debug=False):
 
-    # 1️ collect centroids
+    # 1) collect centroids (x, y in px of the resized image; z in "XY-pixel units")
     centers = []
     for z, mask in enumerate(masks):
-        labeled, _ = measure.label(mask, return_num=True)
+        labeled = mask.astype(np.int32)         # Cellpose instance labels (0 = bg)
         for r in measure.regionprops(labeled):
             cy, cx = r.centroid
             centers.append((cx, cy, z * z_scaling_factor))
     if not centers:
         return 0
-    centers = np.array(centers)
-    if debug:                           # << diagnostic block
-        xy = centers[:, :2]
-        d  = np.linalg.norm(xy[:, None] - xy[None, :], axis=-1)
-        nn = np.partition(d + np.eye(len(d))*1e9, 1)[:, 1]
-        print(f"median nn = {np.median(nn):.1f} px,   "
-              f"95-perc = {np.percentile(nn,95):.1f} px")
-    
+    centers = np.array(centers, dtype=float)
 
-    # 2 HDBSCAN in 3-D
+    if debug:
+        # nearest-neighbour in *3D scaled space*
+        D = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=-1)
+        nn = np.partition(D + np.eye(len(D))*1e9, 1)[:, 1]
+        print(f"median 3D nn = {np.median(nn):.2f} (XY-px units); 95% = {np.percentile(nn,95):.2f}")
+
+    # 2) HDBSCAN in 3-D (use leaf extraction to avoid merging neighbours)
     clusterer = hdbscan.HDBSCAN(
-              min_cluster_size = min_cluster_size,
-              min_samples      = min_samples,
-              metric           = 'euclidean',
-              cluster_selection_epsilon = 5)   
-    labels = clusterer.fit_predict(centers[:, :2])     
+        min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
+        metric='euclidean',
+        cluster_selection_method='leaf',
+        cluster_selection_epsilon=0.0,
+        allow_single_cluster=False,
+        approx_min_span_tree=True
+    )
+    labels = clusterer.fit_predict(centers)   # <-- 3D, not [:, :2] !
 
-    # 3️ split duplicates within each slice
-    zs = (centers[:, 2] / z_scaling_factor).astype(int)   
-    labels = kill_same_slice_duplicates(labels, zs)     # turn dup-in-slice → –1
-    n_clusters= len(set(labels) - {-1})
-    # 4️ (plotting + saving unchanged) …
-    
+    # 3) forbid duplicate labels within the same slice (guard against over-segmentation)
+    zs = (centers[:, 2] / z_scaling_factor).astype(int)
+    labels = kill_same_slice_duplicates(labels, zs)
+
+    # 4) Count clusters and save diagnostic plot
+    n_clusters = len(set(labels) - {-1})
+
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection="3d")
-    palette = sns.color_palette("deep", max(n_clusters, 1))
-    colours = [palette[l] if l >= 0 else (0, 0, 0) for l in labels]
+    uniq = sorted(set(labels) - {-1})
+    palette = sns.color_palette("deep", max(len(uniq), 1))
+    colmap  = {lbl: palette[i % len(palette)] for i, lbl in enumerate(uniq)}
+    colours = [colmap.get(l, (0, 0, 0)) for l in labels]  # noise = black
     ax.scatter(centers[:, 0], centers[:, 1], centers[:, 2], c=colours, s=8)
     ax.text2D(0.05, 0.95, f"Cells detected: {n_clusters}", transform=ax.transAxes)
-    ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z (scaled)")
+    ax.set_xlabel("X (px)")
+    ax.set_ylabel("Y (px)")
+    ax.set_zlabel("Z (XY-px units)")
     out_dir = Path(save_directory) / "3d_images"
     out_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_dir / "object_count_scatter_plot.png", dpi=300)
     plt.close(fig)
 
-    # ----- 4 Persist plain-text count for your Excel aggregation step
+    # 5) Persist count
     with open(Path(save_directory) / "cell_count.txt", "w") as fh:
         fh.write(str(n_clusters))
-    
+
     return n_clusters
 
 
