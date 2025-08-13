@@ -4,16 +4,39 @@ import sys
 import tempfile
 import zipfile
 
-# Make sure we can import processor whether we're run as a package or flat files
-try:
-    from app.processor import process_all_dirs  # preferred
-except Exception:
-    try:
-        from processor import process_all_dirs  # fallback if app/__init__.py is missing
-    except Exception as imp_err:
-        st.error("Could not import processor.py. Ensure `app/processor.py` exists (and add an empty `app/__init__.py`).")
-        st.stop()
+# --- ensure repo root is on sys.path so "app.*" works when running app/main.py directly
+HERE = os.path.dirname(os.path.abspath(__file__))          # .../app
+PROJECT_ROOT = os.path.abspath(os.path.join(HERE, ".."))   # repo root
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+# --- import processor with useful diagnostics
+try:
+    from app.processor import process_all_dirs          # preferred
+except ImportError as e1:
+    try:
+        # fallback if Python is treating this as a flat script and app/ is already on path
+        from processor import process_all_dirs
+    except ImportError as e2:
+        st.error("Couldn't import process_all_dirs from processor.py")
+        st.code(
+            "ImportErrors:\n"
+            f"  app.processor -> {e1}\n"
+            f"  processor      -> {e2}\n\n"
+            f"HERE={HERE}\nPROJECT_ROOT={PROJECT_ROOT}\n"
+            f"sys.path[0:3]={sys.path[:3]} ..."
+        )
+        # show what's actually in the app folder to catch typos/missing files
+        try:
+            st.write("Files in app/:", os.listdir(HERE))
+        except Exception:
+            pass
+        st.stop()
+except Exception as e:
+    # processor.py was found but crashed during import — show the real error
+    st.error("processor.py raised an error during import:")
+    st.exception(e)
+    st.stop()
 # Optional: fetch sample ZIPs from the Hub if huggingface_hub is available
 try:
     from huggingface_hub import hf_hub_download
