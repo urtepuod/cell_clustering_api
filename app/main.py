@@ -2,8 +2,13 @@ import streamlit as st
 import os
 import tempfile
 import zipfile
-from app.processor import process_all_dirs
+import sys, os
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+# ------------------------------------------------------------------
 
+from app.processor import process_all_dirs
 st.set_page_config(page_title="Cell Counting App", layout="wide")
 st.title("🔬 Cell Counting App")
 
