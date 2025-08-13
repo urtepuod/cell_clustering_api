@@ -107,12 +107,12 @@ def create_3d_stack(masks,save_directory):
         for label in range(1, num_labels + 1):
             object_indices = np.argwhere(labeled_mask == label)
             z_coords = np.full((object_indices.shape[0],), i)
-            ax.scatter(object_indices[:, 1], object_indices[:, 0], z_coords, c=np.random.rand(3,), marker='o')
+            ax.scatter(object_indices[:, 1], object_indices[:, 0], z_coords, color=np.random.rand(3,), marker='o')
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Slice (Object Index)')
-
+    fig.tight_layout()
     plt.savefig(os.path.join(stack_dir, "3d_image.png"), dpi=300)
 
 
