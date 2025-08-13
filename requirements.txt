@@ -4,7 +4,7 @@
 torch==2.5.1
 cellpose==2.2.3
 huggingface_hub>=0.34.0
-streamlit==1.37.0
+streamlit==1.48.0 
 numpy
 pandas
 scipy
