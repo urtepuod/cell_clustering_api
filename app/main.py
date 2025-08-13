@@ -26,10 +26,16 @@ uploaded_zip = st.file_uploader("Upload a ZIP of TIFF folders", type="zip")
 # point to your dataset repo + filenames there
 DATASET_ID = "urtepuod/cell_clustering_samples/sample_cells"   # <-- change to your dataset repo
 SAMPLES = {
-    "Non-motile cells demo": "24_03_02_05_34_27.zip",
-    "Motile cells demo": "24_11_19_01_25_31.zip",
+    "Non-motile cells demo": "sample_cells/24_03_02_05_34_27.zip",
+    "Motile cells demo": "sample_cells/24_11_19_01_25_31.zip",
     # add more: "Label": "filename.zip"
-}
+}   
+zip_path = hf_hub_download(
+    repo_id=DATASET_ID,
+    repo_type="dataset",
+    filename=SAMPLES[sample_choice],  # includes subfolder if any
+)
+
 sample_choice = st.selectbox("…or try a sample dataset", ["(none)"] + list(SAMPLES.keys()))
 
 if st.button("Run Analysis", type="primary"):
