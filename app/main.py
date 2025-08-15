@@ -44,8 +44,8 @@ uploaded_zip = st.file_uploader("Upload a ZIP of TIFF folders", type="zip")
 # Your dataset repo on the Hub (namespace/repo only)
 DATASET_ID = "urtepuod/cell_clustering_samples"
 SAMPLES = {
-    "Non-motile cells demo": "sample_cells/24_03_02_05_34_27.zip",
-    "Motile cells demo":     "sample_cells/24_11_19_01_25_31.zip",
+    "Motile cells demo": "sample_cells/24_03_02_05_34_27.zip",
+    "Non-motile cells demo":     "sample_cells/24_11_19_01_25_31.zip",
 }
 sample_choice = st.selectbox("…or try a sample dataset", ["(none)"] + list(SAMPLES.keys()))
 
